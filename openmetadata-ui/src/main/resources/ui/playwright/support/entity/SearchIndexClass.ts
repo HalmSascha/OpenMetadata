@@ -28,6 +28,12 @@ import { uuid } from '../../utils/common';
 import { visitEntityPageByFqn } from '../../utils/entity';
 import { EntityTypeEndpoint, ResponseDataType } from './Entity.interface';
 import { EntityClass } from './EntityClass';
+import { SharedInfra } from './SharedInfra';
+
+/** See TableClass.TableClassOptions. `createFullHierarchy` defaults to false. */
+export type SearchIndexClassOptions = {
+  createFullHierarchy?: boolean;
+};
 
 export class SearchIndexClass extends EntityClass {
   service: {
@@ -61,9 +67,11 @@ export class SearchIndexClass extends EntityClass {
 
   serviceResponseData: ResponseDataType = {} as ResponseDataType;
   entityResponseData: SearchIndex = {} as SearchIndex;
+  createFullHierarchy: boolean;
 
-  constructor(name?: string) {
+  constructor(name?: string, options?: SearchIndexClassOptions) {
     super(EntityTypeEndpoint.SearchIndex);
+    this.createFullHierarchy = options?.createFullHierarchy ?? false;
 
     this.service = {
       name: name ?? `pw-search-service-${uuid()}`,
@@ -157,12 +165,21 @@ export class SearchIndexClass extends EntityClass {
   }
 
   async create(apiContext: APIRequestContext) {
-    this.serviceResponseData = await createOrFetch(apiContext, {
-      label: 'SearchIndexClass.create',
-      createPath: '/api/v1/services/searchServices',
-      fqnSegments: [this.service.name],
-      data: this.service,
-    });
+    if (this.createFullHierarchy) {
+      this.serviceResponseData = await createOrFetch(apiContext, {
+        label: 'SearchIndexClass.create',
+        createPath: '/api/v1/services/searchServices',
+        fqnSegments: [this.service.name],
+        data: this.service,
+      });
+    } else {
+      this.serviceResponseData = await SharedInfra.searchIndexService(
+        apiContext
+      );
+      this.service = { ...this.service, name: this.serviceResponseData.name };
+      this.entity.service = this.serviceResponseData.name;
+    }
+
     this.entityResponseData = await createOrFetch(apiContext, {
       label: 'SearchIndexClass.create',
       createPath: '/api/v1/searchIndexes',
@@ -226,6 +243,17 @@ export class SearchIndexClass extends EntityClass {
   }
 
   async delete(apiContext: APIRequestContext) {
+    if (!this.createFullHierarchy) {
+      const searchIndexResponse = await apiContext.delete(
+        `/api/v1/searchIndexes/${this.entityResponseData?.id}?recursive=true&hardDelete=true`
+      );
+
+      return {
+        service: undefined,
+        entity: searchIndexResponse.body,
+      };
+    }
+
     const serviceResponse = await apiContext.delete(
       `/api/v1/services/searchServices/name/${encodeURIComponent(
         this.serviceResponseData?.fullyQualifiedName ?? ''

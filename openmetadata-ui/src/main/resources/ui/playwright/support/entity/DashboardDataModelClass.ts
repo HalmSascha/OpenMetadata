@@ -28,6 +28,12 @@ import {
   ResponseDataWithServiceType,
 } from './Entity.interface';
 import { EntityClass } from './EntityClass';
+import { SharedInfra } from './SharedInfra';
+
+/** See TableClass.TableClassOptions. `createFullHierarchy` defaults to false. */
+export type DashboardDataModelClassOptions = {
+  createFullHierarchy?: boolean;
+};
 
 export interface DashboardDataModel extends ResponseDataWithServiceType {
   columns: EntityReference[];
@@ -78,9 +84,11 @@ export class DashboardDataModelClass extends EntityClass {
 
   serviceResponseData: ResponseDataType = {} as ResponseDataType;
   entityResponseData: DashboardDataModel = {} as DashboardDataModel;
+  createFullHierarchy: boolean;
 
-  constructor(name?: string) {
+  constructor(name?: string, options?: DashboardDataModelClassOptions) {
     super(EntityTypeEndpoint.DataModel);
+    this.createFullHierarchy = options?.createFullHierarchy ?? false;
 
     this.dashboardDataModelName = `pw-dashboard-data-model-${uuid()}`;
     this.projectName = `pw-project-${uuid()}`;
@@ -162,12 +170,18 @@ export class DashboardDataModelClass extends EntityClass {
   }
 
   async create(apiContext: APIRequestContext) {
-    this.serviceResponseData = await createOrFetch(apiContext, {
-      label: 'DashboardDataModelClass.create service',
-      createPath: '/api/v1/services/dashboardServices',
-      fqnSegments: [this.service.name],
-      data: this.service,
-    });
+    if (this.createFullHierarchy) {
+      this.serviceResponseData = await createOrFetch(apiContext, {
+        label: 'DashboardDataModelClass.create service',
+        createPath: '/api/v1/services/dashboardServices',
+        fqnSegments: [this.service.name],
+        data: this.service,
+      });
+    } else {
+      this.serviceResponseData = await SharedInfra.dashboardService(apiContext);
+      this.service = { ...this.service, name: this.serviceResponseData.name };
+      this.entity.service = this.serviceResponseData.name;
+    }
 
     // Both hand-rolled loops that used to live here — a 409 fallback for the
     // service and a 5xx re-post for the data model — are now inside
@@ -251,6 +265,17 @@ export class DashboardDataModelClass extends EntityClass {
   }
 
   async delete(apiContext: APIRequestContext) {
+    if (!this.createFullHierarchy) {
+      const dataModelResponse = await apiContext.delete(
+        `/api/v1/dashboard/datamodels/${this.entityResponseData?.id}?recursive=true&hardDelete=true`
+      );
+
+      return {
+        service: undefined,
+        entity: dataModelResponse.body,
+      };
+    }
+
     const serviceResponse = await apiContext.delete(
       `/api/v1/services/dashboardServices/name/${encodeURIComponent(
         this.serviceResponseData?.fullyQualifiedName ?? ''
