@@ -77,13 +77,35 @@ public final class ODCSTestCaseMaterializer {
     return new Result(List.copyOf(testCases), List.copyOf(skipped));
   }
 
+  /**
+   * What {@link #materialize} would skip because a different test case already has the name,
+   * without writing anything.
+   */
+  public List<UnsupportedOutcome> conflicts(Request request) {
+    List<UnsupportedOutcome> conflicts = new ArrayList<>();
+    for (TestCaseOutcome outcome : request.outcomes()) {
+      TestCase testCase = toTestCase(outcome, request);
+      TestCase existing = findExisting(testCase.getFullyQualifiedName());
+      if (isOwnedBySomeoneElse(existing, request)
+          && linkIfSameDefinition(existing, testCase).isEmpty()) {
+        conflicts.add(nameTakenOutcome(outcome));
+      }
+    }
+    return List.copyOf(conflicts);
+  }
+
   private Optional<EntityReference> resolve(TestCaseOutcome outcome, Request request) {
-    TestCase testCase = mapper.createToEntity(outcome.testCase(), request.user());
-    repository.setFullyQualifiedName(testCase);
+    TestCase testCase = toTestCase(outcome, request);
     TestCase existing = findExisting(testCase.getFullyQualifiedName());
     return isOwnedBySomeoneElse(existing, request)
         ? linkIfSameDefinition(existing, testCase)
         : Optional.of(write(testCase, existing != null, request));
+  }
+
+  private TestCase toTestCase(TestCaseOutcome outcome, Request request) {
+    TestCase testCase = mapper.createToEntity(outcome.testCase(), request.user());
+    repository.setFullyQualifiedName(testCase);
+    return testCase;
   }
 
   private EntityReference write(TestCase testCase, boolean overwritesExisting, Request request) {
